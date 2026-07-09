@@ -1,0 +1,23 @@
+{
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "api_key": "changeme",
+    "require_api_key": true
+  },
+  "dashboard": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8001,
+    "share": false
+  },
+  "extensions": {
+    "enabled": true,
+    "auto_install_deps": true
+  },
+  "server": {
+    "auto_start_broken_pipe_monitor": true,
+    "log_level": "INFO",
+    "use_colors": true
+  }
+}
