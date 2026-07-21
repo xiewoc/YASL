@@ -1,149 +1,64 @@
-"""YASL 启动入口 — 使用 LifeCycle 统一管理生命周期。"""
-import asyncio
-import signal
+"""YASL 启动入口 — 委托 LifeCycle 管理完整生命周期。"""
 import sys
 import os
-from datetime import datetime
-from typing import List
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from yasl.life_cycle import LifeCycle
-from yasl.main import MinecraftServer
-from yasl.api import load_config
 
 
-def _ts() -> str:
-    return datetime.now().strftime("%H:%M:%S")
+args = []
+
+# 1. 堆内存配置
+args.extend(["-Xms28G", "-Xmx28G", "-Xss1M"])
+
+# 2. GC 选择 与 解锁实验性选项 (必须放在所有 G1 实验性参数之前!)
+args.extend(["-XX:+UseG1GC", "-server"])
+args.extend(["-XX:+UnlockExperimentalVMOptions"])  # <--- 提前到这里
+
+# 3. 所有 G1GC 参数 (包含标准参数和实验性参数，此时解锁已生效)
+args.extend([
+    "-XX:+ParallelRefProcEnabled",
+    "-XX:MaxGCPauseMillis=500",      # 核心优化：放宽暂停目标
+    "-XX:+AlwaysPreTouch",
+    "-XX:+DisableExplicitGC",
+    "-XX:InitiatingHeapOccupancyPercent=40",
+    "-XX:+PerfDisableSharedMem",
+    "-XX:MaxTenuringThreshold=15",
+    "-XX:G1HeapRegionSize=32M",      # 新增：固定 Region 大小
+    
+    # === 以下为实验性参数 (此时 UnlockExperimentalVMOptions 已生效) ===
+    "-XX:G1MaxNewSizePercent=70",    # 允许年轻代更大，减少 GC 频率
+    "-XX:G1MixedGCLiveThresholdPercent=90",
+    "-XX:G1RSetUpdatingPauseTimePercent=5",
+])
+
+# 4. Metaspace 配置
+args.extend(["-XX:MetaspaceSize=1G", "-XX:MaxMetaspaceSize=2G"])
+
+# 5. 系统属性
+args.extend(["-Djava.awt.headless=true", "-Dforge.disableVersionCheck=true"])
+
+# 6. GC 日志
+args.extend(["-Xlog:gc*=info:file=logs/gc.log:time,level,tags:filecount=5,filesize=100M"])
+
+# 【注意】-XX:+UseStringDeduplication 已移除 (节省 CPU)
+
+# 7. 系统属性 (维持不变)
+args.extend(["-Djava.awt.headless=true", "-Dforge.disableVersionCheck=true"])
+
+# 8. GC 日志 (将单文件上限调至 100M 避免频繁滚动)
+args.extend(["-Xlog:gc*=info:file=logs/gc.log:time,level,tags:filecount=5,filesize=100M"])
 
 
-# ---------------------------------------------------------------------------
-# 信号处理
-# ---------------------------------------------------------------------------
-_shutdown_event: asyncio.Event | None = None
-
-
-def _signal_handler(signum, frame):
-    if _shutdown_event:
-        print(f"\n[{_ts()}] 收到退出信号，正在优雅关闭...")
-        _shutdown_event.set()
-
-
-def _setup_signals():
-    signal.signal(signal.SIGINT, _signal_handler)
-    if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, _signal_handler)
-
-
-# ---------------------------------------------------------------------------
-# JVM 参数构建
-# ---------------------------------------------------------------------------
-def _build_jvm_args() -> List[str]:
-    """
-    构建 JVM 启动参数列表，优先级：config.json > 内置默认。
-
-    在 config.json 中配置：
-        "server": { "jvm_args": ["-Xms4G", "-Xmx8G", "-XX:+UseG1GC"] }
-    """
-    config = load_config()
-    cfg_args: List[str] = config.get("server", {}).get("jvm_args", [])
-
-    if cfg_args:
-        print(f"  [JVM] 使用 config.json 中的 {len(cfg_args)} 个参数")
-        return cfg_args
-
-    defaults = [
-        "-Xms4G",
-        "-Xmx8G",
-        "-XX:+UseG1GC",
-        "-XX:+UnlockExperimentalVMOptions",
-        "-XX:G1NewSizePercent=30",
-        "-XX:G1MaxNewSizePercent=60",
-        "-XX:InitiatingHeapOccupancyPercent=40",
-        "-XX:+ParallelRefProcEnabled",
-        "-XX:MaxGCPauseMillis=150",
-        "-XX:+AlwaysPreTouch",
-        "-XX:+UseStringDeduplication",
-        "-Djava.awt.headless=true",
-    ]
-    print(f"  [JVM] 使用 {len(defaults)} 个内置默认参数")
-    return defaults
-
-
-# ---------------------------------------------------------------------------
-# 主流程
-# ---------------------------------------------------------------------------
-async def _handle_console(server: MinecraftServer):
-    """控制台命令输入循环。"""
-    loop = asyncio.get_running_loop()
-    while server.running:
-        try:
-            line = await loop.run_in_executor(None, input)
-        except (EOFError, KeyboardInterrupt):
-            break
-
-        line = line.strip()
-        if not line:
-            continue
-
-        if line == "stop":
-            print(f"[{_ts()}] 正在关闭服务器...")
-            break
-
-        if line == "help":
-            print("  stop    - 关闭服务器")
-            print("  players - 查看在线玩家 (API)")
-            print("  help    - 显示帮助")
-            continue
-
-        result = await server.send_command_async(line)
-        if result["lines"]:
-            for l in result["lines"]:
-                print(l)
-        elif result["timed_out"]:
-            print("(命令超时)")
-
-
-async def main():
-    global _shutdown_event
-
-    _setup_signals()
-    _shutdown_event = asyncio.Event()
-
-    jvm_args = _build_jvm_args()
-
-    print("=" * 50)
-    print("  YASL - Minecraft 服务器启动器")
-    print("=" * 50)
-
-    life = LifeCycle()
-
-    try:
-        async for srv in life.startup(jvm_args=jvm_args):
-            print(f"  输入 'help' 查看命令，'stop' 关闭服务器")
-            print("-" * 50)
-
-            console_task = asyncio.create_task(_handle_console(srv))
-            shutdown_task = asyncio.create_task(_shutdown_event.wait())
-
-            done, pending = await asyncio.wait(
-                [console_task, shutdown_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            for t in pending:
-                t.cancel()
-                try:
-                    await t
-                except asyncio.CancelledError:
-                    pass
-    finally:
-        await life.shutdown()
-        print(f"[{_ts()}] 服务器已关闭")
+async def _main(args) -> None:
+    await LifeCycle().run(args)
 
 
 if __name__ == "__main__":
+    import asyncio
+
     try:
-        asyncio.run(main())
+        asyncio.run(_main(args))
     except KeyboardInterrupt:
-        print(f"\n[{_ts()}] 程序被中断")
+        print("\n程序被中断")

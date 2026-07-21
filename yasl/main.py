@@ -6,24 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 from yasl.loader import Load
-from yasl.logging import LogLevel, LogFilter
-import errno
+from yasl.logging import LogLevel, LogFilter, ExtensionLogger
 
-
-class ManagedServer:
-    """MinecraftServer 的异步上下文管理器，确保退出时自动关闭。"""
-
-    def __init__(self, server: "MinecraftServer", enable_monitor: bool = True):
-        self._server = server
-        self._enable_monitor = enable_monitor
-
-    async def __aenter__(self) -> "MinecraftServer":
-        if self._enable_monitor:
-            await self._server.start_broken_pipe_monitor()
-        return self._server
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self._server.stop()
+_log = ExtensionLogger("Server")
 
 
 class MinecraftServer:
@@ -53,12 +38,11 @@ class MinecraftServer:
 
         self.process: Optional[subprocess.Popen] = None
         self.running: bool = False
-        self.show_all_logs: bool = False
+        self._show_all_logs: bool = False
         self._read_task: Optional[asyncio.Task] = None
 
         self._broken_pipe_check_task: Optional[asyncio.Task] = None
         self._extra_args: List[str] = []
-        self._show_all_logs: bool = False
         self._is_restarting: bool = False
 
     # ------------------------------------------------------------------
@@ -67,7 +51,6 @@ class MinecraftServer:
 
     async def start(self, extra_args: List[str] = [], show_all_logs: bool = False):
         """异步启动服务器"""
-        self.show_all_logs = show_all_logs
         self._extra_args = extra_args
         self._show_all_logs = show_all_logs
 
@@ -76,14 +59,19 @@ class MinecraftServer:
             "-Dfile.encoding=UTF-8",
             "-Dstderr.encoding=UTF-8",
             "-Dstdout.encoding=UTF-8",
+            "-Dfml.ignoreInvalidMinecraftCertificates=true",
+            "-Dfml.ignorePatchDiscrepancies=true",
         ])
-        args.extend(extra_args)
 
         server_type = self.load.server_type()
         if server_type == "forge":
             user_jvm_arg = Path(__file__).parent / ".." / "server" / "user_jvm_args.txt"
             if user_jvm_arg.exists():
                 args.append("@" + str(user_jvm_arg))
+
+            # extra_args 必须在 @unix_args.txt 之前，否则会被当作程序参数
+            # 放在 @user_jvm_args.txt 之后可覆盖其中的 -Xms/-Xmx
+            args.extend(extra_args)
 
             forge_dir = self.load.forge_path
             if forge_dir and forge_dir.is_dir():
@@ -98,7 +86,7 @@ class MinecraftServer:
 
         print(
             f"Starting server with: {' '.join(args[:6])}..."
-            if not self.show_all_logs
+            if not self._show_all_logs
             else f"Starting server with: {' '.join(args)}"
         )
 

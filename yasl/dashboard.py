@@ -78,10 +78,12 @@ def build_ui() -> gr.Blocks:
             every=2,
         )
 
-        # 每 3 秒自动刷新
-        demo.load(_fetch_status, outputs=status, every=3)
-        demo.load(_fetch_players, outputs=players, every=3)
-        demo.load(_fetch_logs, outputs=logs, every=2)
+        # 定时刷新（Gradio 5.x 使用 gr.Timer 替代 demo.load(..., every=)）
+        timer3 = gr.Timer(3, active=True)
+        timer2 = gr.Timer(2, active=True)
+        timer3.tick(_fetch_status, outputs=status)
+        timer3.tick(_fetch_players, outputs=players)
+        timer2.tick(_fetch_logs, outputs=logs)
 
     return demo
 

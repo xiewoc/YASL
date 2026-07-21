@@ -8,6 +8,9 @@ from typing import Any, Dict, List, Optional
 from yasl.event_bus import subscribe, unsubscribe, publish
 from yasl.installer import install_requirements
 from yasl.commands import CommandHelper
+from yasl.logging import ExtensionLogger
+
+_log = ExtensionLogger("ExtManager")
 
 
 # ---------------------------------------------------------------------------
@@ -19,8 +22,9 @@ class ExtensionBase:
     name: str = "unnamed"
     version: str = "0.0.0"
 
-    # 由 ExtensionManager 在 load 时注入
-    commands: CommandHelper = CommandHelper()
+    def __init__(self) -> None:
+        # 由 ExtensionManager 在 load 时注入
+        self.commands: CommandHelper = CommandHelper()
 
     async def on_load(self) -> None:
         """扩展被加载时调用。"""
@@ -114,6 +118,7 @@ class ExtensionManager:
 
                 self._installed[name] = "0.0.0"
                 self._save_state()
+                _log.info(f"发现新扩展: {name}")
                 discovered.append(name)
 
         return discovered
@@ -172,17 +177,23 @@ class ExtensionManager:
                 ext = self.load(name)
                 if ext:
                     await ext.on_load()
-                    print(f"  [Extension] 已加载: {name}")
+                    _log.info(f"已加载: {name}")
 
     async def enable_all(self) -> None:
-        """启用所有已加载的扩展。"""
-        for ext in self._extensions.values():
-            await ext.on_enable()
+        """启用所有已加载的扩展（单个失败不影响其他）。"""
+        for name, ext in self._extensions.items():
+            try:
+                await ext.on_enable()
+            except Exception as e:
+                _log.error(f"启用 {name} 失败: {e}")
 
     async def disable_all(self) -> None:
-        """禁用所有已启用的扩展。"""
-        for ext in self._extensions.values():
-            await ext.on_disable()
+        """禁用所有已启用的扩展（单个失败不影响其他）。"""
+        for name, ext in self._extensions.items():
+            try:
+                await ext.on_disable()
+            except Exception as e:
+                _log.error(f"禁用 {name} 失败: {e}")
 
     async def unload_all(self) -> None:
         """卸载所有扩展。"""

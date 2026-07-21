@@ -7,7 +7,7 @@ YASL 是一个基于 Python 的 Minecraft 服务端启动器，提供 **REST API
 ## 项目结构
 
 ```
-├── run.py                    # 启动入口（主流程、信号处理、JVM 参数）
+├── run.py                    # 启动入口（最简委托 LifeCycle）
 ├── requirements.txt          # Python 依赖
 ├── server/                   # Minecraft 服务端文件（Forge / Paper）
 ├── yasl/                     # 核心模块
@@ -159,6 +159,9 @@ curl http://localhost:8000/health
 # extensions/my_extension/main.py
 from yasl.event_bus import EventType
 from yasl.extension_loader import ExtensionBase
+from yasl.logging import ExtensionLogger
+
+_log = ExtensionLogger("my_extension")
 
 
 class MyExtension(ExtensionBase):
@@ -169,19 +172,19 @@ class MyExtension(ExtensionBase):
         # 注册事件监听
         self.subscribe(EventType.PLAYER_JOIN, self._on_join)
         self.subscribe(EventType.PLAYER_CHAT, self._on_chat)
-        print("[MyExtension] 已启用")
+        _log.info("已启用")
 
     async def on_disable(self) -> None:
         # 务必注销监听，避免内存泄漏
         self.unsubscribe(EventType.PLAYER_JOIN, self._on_join)
         self.unsubscribe(EventType.PLAYER_CHAT, self._on_chat)
-        print("[MyExtension] 已禁用")
+        _log.info("已禁用")
 
     def _on_join(self, player_name: str = "?", **kwargs) -> None:
-        print(f"[MyExtension] {player_name} 加入了游戏")
+        _log.info(f"{player_name} 加入了游戏")
 
     def _on_chat(self, player_name: str = "?", message: str = "", **kwargs) -> None:
-        print(f"[MyExtension] {player_name} 说: {message}")
+        _log.info(f"{player_name} 说: {message}")
 ```
 
 ### 使用 CommandHelper 发送命令
@@ -197,6 +200,22 @@ class MyExtension(ExtensionBase):
         await self.commands.give("PlayerName", "minecraft:diamond", 64)
         # 执行 execute 子命令
         await self.commands.execute_as("@a", "say hello")
+```
+
+### 日志输出（ExtensionLogger）
+
+扩展应使用 `ExtensionLogger` 代替 `print()`，以统一日志格式并自动适配终端颜色。
+
+```python
+from yasl.logging import ExtensionLogger
+
+_log = ExtensionLogger("my_extension")
+
+_log.info("普通信息")       # [INFO] 白色
+_log.warn("警告消息")       # [WARN] 黄色
+_log.error("错误消息")      # [ERROR] 红色
+_log.debug("调试信息")      # [DEBUG] 青色
+_log.done("操作完成")       # [DONE] 品红色
 ```
 
 ### 扩展生命周期钩子

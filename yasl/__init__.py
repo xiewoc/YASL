@@ -12,9 +12,10 @@ from yasl.logging import (
     get_default_filter,
     parse_log_line,
     temporary_filter_config,
+    ExtensionLogger,
 )
 from yasl.event_bus import EventBus, EventType, TYPE_TO_EVENT, subscribe, unsubscribe, publish
-from yasl.main import MinecraftServer, ManagedServer
+from yasl.main import MinecraftServer
 from yasl.api import (
     set_server,
     get_server,
@@ -33,7 +34,6 @@ from yasl.dashboard import run_dashboard
 
 __all__ = [
     "MinecraftServer",
-    "ManagedServer",
     "Load",
     "LogLevel",
     "LogEntry",
@@ -65,4 +65,5 @@ __all__ = [
     "install_requirements",
     "CommandHelper",
     "run_dashboard",
+    "ExtensionLogger",
 ]

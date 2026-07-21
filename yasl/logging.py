@@ -499,6 +499,58 @@ class LogFilter:
         return f"[{current_time}] {tag_color}[{msg_type.upper()}]{reset}: {formatted_line}"
 
 
+# ---------------------------------------------------------------------------
+# 拓展日志接口
+# ---------------------------------------------------------------------------
+class ExtensionLogger:
+    """供扩展使用的简易日志器，自动添加时间戳和颜色。
+
+    用法:
+        logger = ExtensionLogger("backup")
+        logger.info("备份完成")
+        logger.error("备份失败", exc_info=e)
+    """
+
+    __slots__ = ("_name", "_color_scheme")
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._color_scheme: Optional[ColorScheme] = None
+        if ColorSupport.supports_colors():
+            self._color_scheme = ColorScheme()
+
+    def info(self, msg: str) -> None:
+        self._log("INFO", msg, LogLevel.INFO)
+
+    def warn(self, msg: str) -> None:
+        self._log("WARN", msg, LogLevel.WARN)
+
+    def error(self, msg: str) -> None:
+        self._log("ERROR", msg, LogLevel.ERROR)
+
+    def debug(self, msg: str) -> None:
+        self._log("DEBUG", msg, LogLevel.DEBUG)
+
+    def done(self, msg: str) -> None:
+        """成功/完成类消息，对标 DONE 级别。"""
+        self._log("DONE", msg, LogLevel.DONE)
+
+    def _log(self, tag: str, msg: str, level: LogLevel) -> None:
+        now = datetime.now().strftime("%H:%M:%S")
+        if self._color_scheme:
+            cs = self._color_scheme
+            lc = cs.get_level_color(level)
+            nc = cs.source_tag
+            rst = cs.reset
+            line = (
+                f"[{now}] {nc}[{self._name}]{rst} "
+                f"{lc}[{tag}]{rst} {msg}"
+            )
+        else:
+            line = f"[{now}] [{self._name}] [{tag}] {msg}"
+        print(line)
+
+
 # 全局默认过滤器实例
 _default_filter: Optional[LogFilter] = None
 
