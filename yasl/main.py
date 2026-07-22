@@ -45,6 +45,9 @@ class MinecraftServer:
         self._extra_args: List[str] = []
         self._is_restarting: bool = False
 
+        # 命令输出收集器（asyncio.Queue 列表，send_command_async 使用）
+        self._command_collectors: list = []
+
     # ------------------------------------------------------------------
     # 启动 / 停止
     # ------------------------------------------------------------------
@@ -53,6 +56,8 @@ class MinecraftServer:
         """异步启动服务器"""
         self._extra_args = extra_args
         self._show_all_logs = show_all_logs
+        # 清空上次遗留的命令收集器
+        self._command_collectors.clear()
 
         args = ["java"]
         args.extend([
@@ -192,7 +197,10 @@ class MinecraftServer:
 
         while self.running:
             try:
-                line = await loop.run_in_executor(None, self.process.stdout.readline)
+                line = await asyncio.wait_for(
+                    loop.run_in_executor(None, self.process.stdout.readline),
+                    timeout=5.0,
+                )
                 if not line:
                     if buf:
                         await self._process_buffer_async(buf)
@@ -203,6 +211,14 @@ class MinecraftServer:
                     await self._process_buffer_async(buf)
                     buf.clear()
                     last = now
+            except asyncio.TimeoutError:
+                # readline 在 5 秒内未返回完整行（可能遇到 \r 结尾的进度条等）
+                # 继续等待，不中断循环
+                if buf:
+                    await self._process_buffer_async(buf)
+                    buf.clear()
+                    last = datetime.now()
+                continue
             except Exception as e:
                 print(f"Error reading output: {e}")
                 if buf:
@@ -214,6 +230,13 @@ class MinecraftServer:
             await self._process_log_line_async(line)
 
     async def _process_log_line_async(self, line: str):
+        # 将原始行推送到所有活跃的命令收集器
+        for q in self._command_collectors:
+            try:
+                q.put_nowait(line)
+            except asyncio.QueueFull:
+                pass
+
         entry = self.log_filter.parse_log_line(line)
         if entry and self.log_filter.should_show(entry):
             formatted = self.log_filter.format_log(entry)
@@ -229,64 +252,53 @@ class MinecraftServer:
     # ------------------------------------------------------------------
 
     async def send_command_async(self, command: str, timeout: float = 5.0) -> Dict[str, Any]:
+        """向服务器发送命令并收集响应行。
+
+        使用 asyncio.Queue 从主日志管道收集输出，不再创建竞争读取线程。
+        """
         if not (self.process and self.running and self.process.stdin):
             return {"lines": [], "timed_out": False, "count": 0}
 
-        from threading import Event
-        import threading
-
         result_lines: List[str] = []
-        stop = Event()
-
-        def _reader():
-            if not self.process or not self.process.stdout:
-                return
-            try:
-                asyncio.get_event_loop()
-            except RuntimeError:
-                return
-            while not stop.is_set() and self.running:
-                try:
-                    l = self.process.stdout.readline()
-                    if not l:
-                        break
-                    result_lines.append(l.rstrip("\n"))
-                except Exception:
-                    break
+        q: asyncio.Queue = asyncio.Queue(maxsize=500)
+        self._command_collectors.append(q)
 
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, self._write_command_sync, command)
 
-            t = threading.Thread(target=_reader, daemon=True)
-            t.start()
+            deadline = loop.time() + timeout
+            idle_ticks = 0
+            TICK = 0.1
+            IDLE_MAX = 8  # 0.8 秒无新输出即认为命令执行完毕
 
-            elapsed, idle_ticks, last_count = 0.0, 0, 0
-            TICK, IDLE_MAX = 0.15, 6
-
-            while elapsed < timeout:
-                await asyncio.sleep(TICK)
-                elapsed += TICK
-                cur = len(result_lines)
-                if cur == last_count:
-                    idle_ticks += 1
-                else:
-                    idle_ticks = 0
-                    last_count = cur
-                if cur > 0 and idle_ticks >= IDLE_MAX:
+            while loop.time() < deadline:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
                     break
-
-            stop.set()
-            t.join(timeout=0.5)
+                try:
+                    line = await asyncio.wait_for(q.get(), timeout=min(TICK, remaining))
+                    result_lines.append(line.rstrip("\n") if line.endswith("\n") else line)
+                    idle_ticks = 0
+                except asyncio.TimeoutError:
+                    if result_lines:
+                        idle_ticks += 1
+                        if idle_ticks >= IDLE_MAX:
+                            break
 
             return {
                 "lines": list(result_lines),
-                "timed_out": elapsed >= timeout and len(result_lines) == 0,
+                "timed_out": loop.time() >= deadline and len(result_lines) == 0,
                 "count": len(result_lines),
             }
         except Exception as e:
             print(f"Error sending command: {e}")
             return {"lines": [], "timed_out": False, "count": 0}
+        finally:
+            try:
+                self._command_collectors.remove(q)
+            except ValueError:
+                pass
 
     def send_command(self, command: str) -> Optional[str]:
         if self.process and self.running and self.process.stdin:

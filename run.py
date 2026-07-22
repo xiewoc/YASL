@@ -10,11 +10,11 @@ from yasl.life_cycle import LifeCycle
 args = []
 
 # 1. 堆内存配置
-args.extend(["-Xms28G", "-Xmx28G", "-Xss1M"])
+args.extend(["-Xms20G", "-Xmx20G", "-Xss1M"])
 
 # 2. GC 选择 与 解锁实验性选项 (必须放在所有 G1 实验性参数之前!)
 args.extend(["-XX:+UseG1GC", "-server"])
-args.extend(["-XX:+UnlockExperimentalVMOptions"])  # <--- 提前到这里
+args.extend(["-XX:+UnlockExperimentalVMOptions"])
 
 # 3. 所有 G1GC 参数 (包含标准参数和实验性参数，此时解锁已生效)
 args.extend([
@@ -42,13 +42,7 @@ args.extend(["-Djava.awt.headless=true", "-Dforge.disableVersionCheck=true"])
 # 6. GC 日志
 args.extend(["-Xlog:gc*=info:file=logs/gc.log:time,level,tags:filecount=5,filesize=100M"])
 
-# 【注意】-XX:+UseStringDeduplication 已移除 (节省 CPU)
-
-# 7. 系统属性 (维持不变)
-args.extend(["-Djava.awt.headless=true", "-Dforge.disableVersionCheck=true"])
-
-# 8. GC 日志 (将单文件上限调至 100M 避免频繁滚动)
-args.extend(["-Xlog:gc*=info:file=logs/gc.log:time,level,tags:filecount=5,filesize=100M"])
+# -XX:+UseStringDeduplication 已移除 (节省 CPU)
 
 
 async def _main(args) -> None:

@@ -163,9 +163,12 @@ class ColorScheme:
         elif self.color_mode == "16":
             for attr in _COLOR_ATTRS:
                 setattr(self, attr, COLORS_16.get(attr, ""))
-        else:
+        elif self.color_mode == "true_color":
             for attr in _COLOR_ATTRS:
                 setattr(self, attr, COLORS_TRUECOLOR.get(attr, ""))
+        else:
+            for attr in _COLOR_ATTRS:
+                setattr(self, attr, COLORS_16.get(attr, ""))
 
     @staticmethod
     def _detect_color_mode(color_mode: str) -> str:
