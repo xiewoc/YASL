@@ -1,6 +1,7 @@
 """YASL REST API — FastAPI + uvicorn，提供 /players 与 /command 端点。"""
 import asyncio
 import json
+import re
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -68,13 +69,49 @@ subscribe(EventType.PLAYER_JOIN, _on_player_join)
 subscribe(EventType.PLAYER_LEAVE, _on_player_leave)
 
 
-def get_players_info() -> Dict[str, Any]:
+# list 命令输出的 regex
+_LIST_RE = re.compile(
+    r"There are (\d+) of a max of (\d+) players? online:?\s*(.*)",
+    re.IGNORECASE,
+)
+
+
+def get_players_info_sync() -> Dict[str, Any]:
+    """同步读取事件总线维护的在线玩家集合（供 Dashboard 等同步上下文使用）。"""
     with _players_lock:
         players = sorted(_players_online)
     return {
         "count": len(players),
         "players": players,
     }
+
+
+async def get_players_info() -> Dict[str, Any]:
+    """通过 stdin 发送 list 命令，从 stdout 用正则提取在线玩家名称和总人数。
+
+    若命令失败则回退到事件总线数据。
+    """
+    server = get_server()
+    if server and server.running:
+        result = await server.send_command_async("list", timeout=3.0)
+        for line in result.get("lines", []):
+            m = _LIST_RE.search(line)
+            if m:
+                count = int(m.group(1))
+                max_players = int(m.group(2))
+                names_str = m.group(3).strip()
+                players = (
+                    [n.strip() for n in names_str.split(",") if n.strip()]
+                    if names_str
+                    else []
+                )
+                return {
+                    "count": count,
+                    "players": players,
+                    "max_players": max_players,
+                }
+    # 回退到事件总线
+    return get_players_info_sync()
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +199,7 @@ async def players_endpoint() -> JSONResponse:
             "players": ["Alice", "Bob", "Charlie"]
         }
     """
-    info = get_players_info()
+    info = await get_players_info()
     return JSONResponse(content=info)
 
 

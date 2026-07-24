@@ -4,7 +4,7 @@ from datetime import datetime
 
 import gradio as gr
 
-from yasl.api import get_server, get_players_info
+from yasl.api import get_server, get_players_info_sync
 from yasl.event_bus import subscribe, EventType
 
 # ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ def _fetch_status() -> str:
 
 
 def _fetch_players() -> str:
-    info = get_players_info()
+    info = get_players_info_sync()
     count = info["count"]
     if count == 0:
         return "暂无在线玩家"

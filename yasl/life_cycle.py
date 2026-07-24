@@ -207,7 +207,7 @@ class LifeCycle:
     # ------------------------------------------------------------------
     def _setup_signals(self) -> None:
         """注册 SIGINT / SIGTERM 信号处理器。"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _handler(*args):
             if not self._shutdown_event.is_set():

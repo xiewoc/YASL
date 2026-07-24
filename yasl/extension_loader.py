@@ -21,6 +21,8 @@ class ExtensionBase:
 
     name: str = "unnamed"
     version: str = "0.0.0"
+    author: str = ""
+    repo: str = ""
 
     def __init__(self) -> None:
         # 由 ExtensionManager 在 load 时注入
@@ -68,9 +70,9 @@ class ExtensionManager:
         # 命令接口（供扩展调用）
         self._commands = commands or CommandHelper()
 
-        # 已安装扩展记录（扩展名 → 版本）
+        # 已安装扩展记录（扩展名 → 版本 / 元信息）
         self._state_file = self._dir / ".installed.json"
-        self._installed: Dict[str, str] = self._load_state()
+        self._installed: Dict[str, Any] = self._load_state()
 
         # 已加载的扩展实例
         self._extensions: Dict[str, ExtensionBase] = {}
@@ -78,7 +80,7 @@ class ExtensionManager:
     # ------------------------------------------------------------------
     # 状态持久化
     # ------------------------------------------------------------------
-    def _load_state(self) -> Dict[str, str]:
+    def _load_state(self) -> Dict[str, Any]:
         if self._state_file.exists():
             try:
                 with open(self._state_file, "r", encoding="utf-8") as f:
@@ -89,7 +91,7 @@ class ExtensionManager:
 
     def _save_state(self) -> None:
         with open(self._state_file, "w", encoding="utf-8") as f:
-            json.dump(self._installed, f, indent=2)
+            json.dump(self._installed, f, indent=2, ensure_ascii=False)
 
     # ------------------------------------------------------------------
     # 扫描 & 安装
@@ -116,6 +118,7 @@ class ExtensionManager:
                     print(f"  [Extension] 安装 {name} 依赖...")
                     await install_requirements(req_file)
 
+                # 占位版本，实际版本在 load() 时从类定义中读取
                 self._installed[name] = "0.0.0"
                 self._save_state()
                 _log.info(f"发现新扩展: {name}")
@@ -154,6 +157,14 @@ class ExtensionManager:
                 ext.name = name
                 ext.commands = self._commands  # 注入命令接口
                 self._extensions[name] = ext
+
+                # 从类定义中读取元信息并持久化
+                self._installed[name] = {
+                    "version": ext.version,
+                    "author": ext.author,
+                    "repo": ext.repo,
+                }
+                self._save_state()
                 return ext
 
         return None
@@ -204,3 +215,27 @@ class ExtensionManager:
     @property
     def loaded_extensions(self) -> Dict[str, ExtensionBase]:
         return dict(self._extensions)
+
+    # ------------------------------------------------------------------
+    # 元信息查询
+    # ------------------------------------------------------------------
+    def get_extension_meta(self, name: str) -> Optional[Dict[str, Any]]:
+        """获取扩展元数据：name, version, author, repo。"""
+        ext = self._extensions.get(name)
+        if ext is None:
+            return None
+        return {
+            "name": ext.name,
+            "version": ext.version,
+            "author": ext.author,
+            "repo": ext.repo,
+        }
+
+    def list_extensions(self) -> List[Dict[str, Any]]:
+        """列出所有已加载扩展的元数据。"""
+        result: List[Dict[str, Any]] = []
+        for name in self._extensions:
+            meta = self.get_extension_meta(name)
+            if meta:
+                result.append(meta)
+        return result

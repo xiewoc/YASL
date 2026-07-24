@@ -1,0 +1,10 @@
+{
+  "backup_dir": "backups",
+  "interval_minutes": 30,
+  "max_backup_size_mb": 0,
+  "keep_count": 10,
+  "source_dirs": [
+    "server/world"
+  ],
+  "save_all_before_backup": true
+}
